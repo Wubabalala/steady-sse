@@ -40,13 +40,17 @@ public class SseHeartbeatDetector {
                 }
                 wrapper.emitter.sendHeartbeat();
             } catch (Exception e) {
-                log.debug("[SteadySSE] Heartbeat failed for key={}, cleaning up: {}", key, e.getMessage());
+                log.debug("[SteadySSE] Heartbeat failed for key={} (client likely disconnected): {}",
+                        key, e.getMessage());
                 try {
-                    wrapper.emitter.completeWithTimeout("heartbeat-send-failure");
+                    // Mark cancelled first to prevent retry attempts on a dead connection
+                    wrapper.emitter.markCancelled();
+                    // Use completeWithError — this is a disconnect, not a timeout
+                    wrapper.emitter.completeWithError(
+                            new java.io.IOException("Client disconnected (heartbeat failed): " + e.getMessage()));
                 } catch (Exception cleanupEx) {
                     log.trace("[SteadySSE] Cleanup after heartbeat failure also failed for key={}: {}",
                             key, cleanupEx.getMessage());
-                    // Force removal as last resort
                     connectionManager.removeOnly(key);
                 }
             }
