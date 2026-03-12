@@ -33,10 +33,12 @@ import static org.assertj.core.api.Assertions.assertThat;
         classes = TestApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
-                "steady-sse.max-concurrent=5",
+                "steady-sse.max-concurrent=20",
                 "steady-sse.timeout.first-chunk=2s",
                 "steady-sse.timeout.idle=3s",
-                "steady-sse.timeout.hard=60s"
+                "steady-sse.timeout.hard=60s",
+                "steady-sse.heartbeat-interval=60s",
+                "steady-sse.cleanup-interval=60s"
         }
 )
 class SseAcceptanceTest {
@@ -188,53 +190,67 @@ class SseAcceptanceTest {
 
     @Test
     void acceptance3_heartbeatDetectsDisconnect() throws Exception {
-        // Use managed-stream which sends data (avoids OkHttp read timeout on idle streams)
-        var call = httpClient.newCall(sseRequest("/test/managed-stream"));
+        int activeBefore = connectionManager.getActiveCount();
+
+        // Use long-stream which hangs after initial heartbeat
+        var call = httpClient.newCall(sseRequest("/test/long-stream"));
         var response = call.execute();
 
-        // Read at least one data line to confirm connection is established
+        // Read initial comment to confirm connection is established
         var reader = new BufferedReader(new InputStreamReader(response.body().byteStream()));
         String firstLine = reader.readLine();
         assertThat(firstLine).isNotNull();
 
-        int activeBefore = connectionManager.getActiveCount();
-        assertThat(activeBefore).isGreaterThanOrEqualTo(1);
+        assertThat(connectionManager.getActiveCount())
+                .as("Connection should be registered")
+                .isGreaterThan(activeBefore);
 
-        // Client disconnects mid-stream
+        // Client disconnects
         call.cancel();
         response.close();
         Thread.sleep(300);
 
-        // Heartbeat should detect the dead connection
+        // Heartbeat should detect the dead connection and trigger cleanup
         heartbeatDetector.sendHeartbeats();
         Thread.sleep(500);
 
-        // Connection should be cleaned up
-        // Note: cleanup happens via Spring's onCompletion callback or heartbeat detection
+        // Retry heartbeat in case first one raced with TCP close
+        heartbeatDetector.sendHeartbeats();
+        Thread.sleep(500);
+
+        assertThat(connectionManager.getActiveCount())
+                .as("Disconnected connection must be cleaned up after heartbeat detection")
+                .isEqualTo(activeBefore);
     }
 
     // === Group 5: Concurrency ===
 
     @Test
     void acceptance15_concurrencyLimitEnforced() throws Exception {
-        int baseLine = connectionManager.getActiveCount();
-
-        // Max concurrent is 5. Open 5 managed streams.
+        // Fill all 20 permits by opening long-stream connections
+        int maxConcurrent = connectionManager.getMaxConcurrent();
         var responses = new ArrayList<Response>();
         var calls = new ArrayList<okhttp3.Call>();
 
         try {
-            for (int i = 0; i < 5; i++) {
-                var c = httpClient.newCall(sseRequest("/test/managed-stream"));
+            for (int i = 0; i < maxConcurrent; i++) {
+                var c = httpClient.newCall(sseRequest("/test/long-stream"));
                 calls.add(c);
                 responses.add(c.execute());
-                Thread.sleep(100); // stagger to ensure registration
             }
 
-            Thread.sleep(300); // let all registrations complete
-            assertThat(connectionManager.getActiveCount())
-                    .as("Should have 5 active connections (plus any baseline)")
-                    .isGreaterThanOrEqualTo(5);
+            Thread.sleep(500); // let all registrations complete
+            assertThat(connectionManager.getAvailablePermits())
+                    .as("No permits should remain after filling all slots")
+                    .isEqualTo(0);
+
+            // Next connection must be rejected (HTTP 500 with SseConnectionRejectedException)
+            var extraCall = httpClient.newCall(sseRequest("/test/long-stream"));
+            var extraResponse = extraCall.execute();
+            assertThat(extraResponse.code())
+                    .as("Connection beyond limit must be rejected with server error")
+                    .isEqualTo(500);
+            extraResponse.close();
         } finally {
             for (var c : calls) c.cancel();
             for (var r : responses) r.close();

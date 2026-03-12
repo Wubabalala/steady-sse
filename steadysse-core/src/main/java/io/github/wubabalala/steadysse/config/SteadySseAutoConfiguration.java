@@ -16,7 +16,9 @@ import org.springframework.context.annotation.Bean;
 /**
  * Spring Boot auto-configuration for SteadySSE.
  * <p>
- * Wires all core components with sensible defaults.
+ * Wires all core components with sensible defaults. Scheduling is handled
+ * by {@link SteadySseSchedulingConfiguration} to avoid circular dependencies.
+ * <p>
  * All beans are {@code @ConditionalOnMissingBean} — users can override any bean.
  */
 @AutoConfiguration

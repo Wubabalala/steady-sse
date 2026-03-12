@@ -4,48 +4,76 @@
     <meta charset="UTF-8">
     <title>SteadySSE Demo</title>
     <style>
-        body { font-family: monospace; max-width: 600px; margin: 40px auto; }
-        #output { white-space: pre-wrap; background: #f0f0f0; padding: 16px; min-height: 200px; }
-        button { padding: 8px 16px; margin: 8px 4px; cursor: pointer; }
+        body { font-family: monospace; max-width: 700px; margin: 40px auto; }
+        .output { white-space: pre-wrap; background: #f0f0f0; padding: 16px; min-height: 150px; margin: 8px 0; }
+        button { padding: 8px 16px; margin: 4px; cursor: pointer; }
+        h2 { margin-top: 24px; }
+        .hint { color: #666; font-size: 0.9em; }
     </style>
 </head>
 <body>
     <h1>SteadySSE Demo</h1>
-    <button onclick="startStream()">Start Stream</button>
-    <button onclick="stopStream()">Stop Stream</button>
-    <div id="output"></div>
+
+    <h2>Basic Stream</h2>
+    <button onclick="startStream('/stream', 'output1')">Start</button>
+    <button onclick="stopStream('stream1')">Stop</button>
+    <div id="output1" class="output"></div>
+
+    <h2>Stream with Auto-Cancel</h2>
+    <p class="hint">Start this stream, then click Stop mid-way. Check server logs to see the upstream call auto-cancelled.</p>
+    <button onclick="startStream('/stream-with-cancel', 'output2')">Start</button>
+    <button onclick="stopStream('stream2')">Stop</button>
+    <div id="output2" class="output"></div>
+
+    <h2>Metrics</h2>
+    <button onclick="fetchMetrics()">Refresh</button>
+    <div id="metrics" class="output">Click Refresh to load metrics</div>
 
     <script>
-        let eventSource = null;
+        const sources = {};
 
-        function startStream() {
-            stopStream();
-            const output = document.getElementById('output');
+        function startStream(path, outputId) {
+            const key = outputId === 'output1' ? 'stream1' : 'stream2';
+            stopStream(key);
+            const output = document.getElementById(outputId);
             output.textContent = 'Connecting...\n';
 
-            eventSource = new EventSource('/stream');
+            const es = new EventSource(path);
+            sources[key] = es;
 
-            eventSource.addEventListener('chunk', function(e) {
-                const data = JSON.parse(e.data);
-                output.textContent += data.content;
+            es.addEventListener('message', function(e) {
+                output.textContent += e.data;
             });
 
-            eventSource.addEventListener('done', function(e) {
+            es.addEventListener('done', function() {
                 output.textContent += '\n[Stream completed]';
-                eventSource.close();
+                es.close();
+                delete sources[key];
             });
 
-            eventSource.onerror = function() {
-                output.textContent += '\n[Connection error]';
-                eventSource.close();
+            es.onerror = function() {
+                output.textContent += '\n[Connection closed]';
+                es.close();
+                delete sources[key];
             };
         }
 
-        function stopStream() {
-            if (eventSource) {
-                eventSource.close();
-                eventSource = null;
+        function stopStream(key) {
+            if (sources[key]) {
+                sources[key].close();
+                delete sources[key];
             }
+        }
+
+        function fetchMetrics() {
+            fetch('/actuator/steadysse')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('metrics').textContent = JSON.stringify(data, null, 2);
+                })
+                .catch(e => {
+                    document.getElementById('metrics').textContent = 'Error: ' + e.message;
+                });
         }
     </script>
 </body>

@@ -18,7 +18,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SteadySseAutoConfigurationTest {
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withConfiguration(AutoConfigurations.of(SteadySseAutoConfiguration.class));
+            .withConfiguration(AutoConfigurations.of(
+                    SteadySseAutoConfiguration.class,
+                    SteadySseSchedulingConfiguration.class));
 
     @Test
     void allCoreBeansAutoConfigured() {
@@ -75,6 +77,13 @@ class SteadySseAutoConfigurationTest {
                     // Custom one has maxConcurrent=5
                     assertThat(manager.getMaxConcurrent()).isEqualTo(5);
                 });
+    }
+
+    @Test
+    void schedulingConfigurationIsRegistered() {
+        runner.run(context -> {
+            assertThat(context).hasSingleBean(SteadySseSchedulingConfiguration.class);
+        });
     }
 
     // === Test configurations ===
