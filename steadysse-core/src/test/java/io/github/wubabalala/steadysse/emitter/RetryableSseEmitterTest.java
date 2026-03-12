@@ -221,6 +221,27 @@ class RetryableSseEmitterTest {
     }
 
     @Test
+    void lateTimeoutOnCompletedEmitterDoesNotDoubleFire() {
+        var emitter = createEmitter();
+        var timeoutCount = new AtomicInteger(0);
+        var completeCount = new AtomicInteger(0);
+        emitter.addLifecycleListener(new SseLifecycleListener() {
+            @Override public void onTimeout(String reason) { timeoutCount.incrementAndGet(); }
+            @Override public void onComplete(StreamEndStatus status) { completeCount.incrementAndGet(); }
+        });
+
+        // Normal completion first
+        emitter.complete();
+        assertThat(completeCount.get()).isEqualTo(1);
+        assertThat(timeoutCount.get()).isEqualTo(0);
+
+        // Simulate late Spring timeout callback — should be no-op
+        emitter.completeWithTimeout("late-spring-timeout");
+        assertThat(completeCount.get()).isEqualTo(1); // still 1, not 2
+        assertThat(timeoutCount.get()).isEqualTo(0);   // still 0, not 1
+    }
+
+    @Test
     void successHasNoDetailSignal() {
         var emitter = createEmitter();
         var order = new java.util.ArrayList<String>();

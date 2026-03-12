@@ -129,6 +129,9 @@ public class RetryableSseEmitter extends FlushingSseEmitter {
 
     private void handleSpringOnTimeout() {
         log.debug("[SteadySSE] Spring onTimeout triggered (fallback path)");
+        // Guard: only fire if doFinalComplete actually ran (not already completed)
+        // Without this, a late Spring timeout callback on an already-completed emitter
+        // would redundantly fire the timeout listener.
         doFinalComplete(StreamEndStatus.TIMEOUT, null, "spring-timeout");
     }
 

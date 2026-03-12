@@ -61,6 +61,9 @@ public class SseConnectionManager {
         var wrapper = new EmitterWrapper(emitter);
         connections.put(key, wrapper);
 
+        // Bind activity callback — refreshes idle timeout on each successful send
+        emitter.setActivityCallback(() -> updateActivity(key));
+
         // Auto-register cleanup listener — cleanup ONLY in onComplete (terminal signal)
         emitter.addLifecycleListener(new SseLifecycleListener() {
             @Override
