@@ -8,6 +8,9 @@ import io.github.wubabalala.steadysse.lifecycle.StreamEndStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.wubabalala.steadysse.metrics.SseConnectionMetrics;
+import io.github.wubabalala.steadysse.metrics.SseConnectionMetricsSnapshot;
+
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,10 +41,16 @@ public class SseConnectionManager {
     private final ConcurrentHashMap<String, EmitterWrapper> connections = new ConcurrentHashMap<>();
     private final Semaphore semaphore;
     private final int maxConcurrent;
+    private final SseConnectionMetrics metrics;
 
     public SseConnectionManager(SteadySseProperties properties) {
+        this(properties, null);
+    }
+
+    public SseConnectionManager(SteadySseProperties properties, SseConnectionMetrics metrics) {
         this.maxConcurrent = properties.getMaxConcurrent();
         this.semaphore = new Semaphore(maxConcurrent);
+        this.metrics = metrics;
     }
 
     /**
@@ -54,6 +63,9 @@ public class SseConnectionManager {
      */
     public void register(String key, RetryableSseEmitter emitter) {
         if (!semaphore.tryAcquire()) {
+            if (metrics != null) {
+                metrics.recordRejection();
+            }
             throw new SseConnectionRejectedException(
                     "SSE connection limit reached (" + maxConcurrent + "). Try again later.");
         }
@@ -68,6 +80,9 @@ public class SseConnectionManager {
         emitter.addLifecycleListener(new SseLifecycleListener() {
             @Override
             public void onComplete(StreamEndStatus status) {
+                if (metrics != null) {
+                    metrics.recordCompletion(status);
+                }
                 doRelease(key, "lifecycle-" + status);
             }
         });
@@ -170,6 +185,16 @@ public class SseConnectionManager {
 
     public int getAvailablePermits() {
         return semaphore.availablePermits();
+    }
+
+    /**
+     * Get a point-in-time metrics snapshot. Returns null if no metrics collector is configured.
+     */
+    public SseConnectionMetricsSnapshot getMetricsSnapshot() {
+        if (metrics == null) {
+            return null;
+        }
+        return metrics.snapshot(getActiveCount(), maxConcurrent, getAvailablePermits());
     }
 
     /**

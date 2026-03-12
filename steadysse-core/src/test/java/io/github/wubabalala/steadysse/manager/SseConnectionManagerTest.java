@@ -5,6 +5,7 @@ import io.github.wubabalala.steadysse.emitter.RetryableSseEmitter;
 import io.github.wubabalala.steadysse.exception.SseConnectionRejectedException;
 import io.github.wubabalala.steadysse.lifecycle.SseLifecycleListener;
 import io.github.wubabalala.steadysse.lifecycle.StreamEndStatus;
+import io.github.wubabalala.steadysse.metrics.SseConnectionMetrics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -177,6 +178,60 @@ class SseConnectionManagerTest {
         assertThat(manager.getAvailablePermits()).isEqualTo(1);
         e1.complete();
         assertThat(manager.getAvailablePermits()).isEqualTo(2);
+    }
+
+    // === Metrics Integration ===
+
+    @Test
+    void metricsRecordCompletionByStatus() {
+        var metrics = new SseConnectionMetrics();
+        var props = new SteadySseProperties();
+        props.setMaxConcurrent(10);
+        var mgr = new SseConnectionManager(props, metrics);
+
+        var e1 = createEmitter();
+        var e2 = createEmitter();
+        var e3 = createEmitter();
+        var e4 = createEmitter();
+        mgr.register("k1", e1);
+        mgr.register("k2", e2);
+        mgr.register("k3", e3);
+        mgr.register("k4", e4);
+
+        e1.complete();                                          // SUCCESS
+        e2.completeWithError(new RuntimeException("fail"));     // ERROR
+        e3.completeWithTimeout("idle");                         // TIMEOUT
+        e4.completeWithCancel();                                // CANCELLED
+
+        var snapshot = mgr.getMetricsSnapshot();
+        assertThat(snapshot).isNotNull();
+        assertThat(snapshot.totalCompleted()).isEqualTo(4);
+        assertThat(snapshot.totalErrors()).isEqualTo(1);
+        assertThat(snapshot.totalTimeouts()).isEqualTo(1);
+        assertThat(snapshot.totalCancelled()).isEqualTo(1);
+    }
+
+    @Test
+    void metricsRecordRejection() {
+        var metrics = new SseConnectionMetrics();
+        var props = new SteadySseProperties();
+        props.setMaxConcurrent(1);
+        var mgr = new SseConnectionManager(props, metrics);
+
+        mgr.register("k1", createEmitter());
+
+        try {
+            mgr.register("k2", createEmitter());
+        } catch (SseConnectionRejectedException ignored) {
+        }
+
+        var snapshot = mgr.getMetricsSnapshot();
+        assertThat(snapshot.totalRejected()).isEqualTo(1);
+    }
+
+    @Test
+    void noMetricsReturnsNull() {
+        assertThat(manager.getMetricsSnapshot()).isNull();
     }
 
     private RetryableSseEmitter createEmitter() {
