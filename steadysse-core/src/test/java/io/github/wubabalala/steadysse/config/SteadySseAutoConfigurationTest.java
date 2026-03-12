@@ -10,6 +10,8 @@ import io.github.wubabalala.steadysse.spi.TimeoutProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.time.Duration;
 
@@ -86,6 +88,26 @@ class SteadySseAutoConfigurationTest {
         });
     }
 
+    @Test
+    void defaultTaskSchedulerHasTwoThreads() {
+        runner.run(context -> {
+            var scheduler = context.getBean("steadySseTaskScheduler", TaskScheduler.class);
+            assertThat(scheduler).isInstanceOf(ThreadPoolTaskScheduler.class);
+            assertThat(((ThreadPoolTaskScheduler) scheduler).getPoolSize()).isEqualTo(2);
+        });
+    }
+
+    @Test
+    void customTaskSchedulerIsRespected() {
+        runner.withUserConfiguration(CustomSchedulerConfig.class)
+                .run(context -> {
+                    var scheduler = context.getBean("steadySseTaskScheduler", TaskScheduler.class);
+                    assertThat(scheduler).isInstanceOf(ThreadPoolTaskScheduler.class);
+                    // Custom one has pool size 4
+                    assertThat(((ThreadPoolTaskScheduler) scheduler).getPoolSize()).isEqualTo(4);
+                });
+    }
+
     // === Test configurations ===
 
     static class CustomTimeoutProviderConfig {
@@ -105,6 +127,16 @@ class SteadySseAutoConfigurationTest {
             var props = new SteadySseProperties();
             props.setMaxConcurrent(5);
             return new SseConnectionManager(props);
+        }
+    }
+
+    static class CustomSchedulerConfig {
+        @org.springframework.context.annotation.Bean(name = "steadySseTaskScheduler")
+        TaskScheduler steadySseTaskScheduler() {
+            var scheduler = new ThreadPoolTaskScheduler();
+            scheduler.setPoolSize(4);
+            scheduler.setThreadNamePrefix("custom-sse-");
+            return scheduler;
         }
     }
 }

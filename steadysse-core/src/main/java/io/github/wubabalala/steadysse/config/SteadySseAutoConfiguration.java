@@ -12,6 +12,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 /**
  * Spring Boot auto-configuration for SteadySSE.
@@ -64,5 +66,24 @@ public class SteadySseAutoConfiguration {
     @ConditionalOnClass(name = "org.springframework.boot.actuate.endpoint.annotation.Endpoint")
     public SseConnectionEndpoint sseConnectionEndpoint(SseConnectionManager connectionManager) {
         return new SseConnectionEndpoint(connectionManager);
+    }
+
+    /**
+     * Default TaskScheduler for heartbeat and timeout tasks.
+     * <p>
+     * Uses 2 threads (one for heartbeat, one for timeout) to prevent them from
+     * blocking each other. Users can override by defining their own {@code TaskScheduler} bean.
+     * <p>
+     * For high-throughput scenarios on Java 21+, consider providing a virtual-thread-based
+     * scheduler or increasing the pool size.
+     */
+    @Bean(name = "steadySseTaskScheduler")
+    @ConditionalOnMissingBean(name = "steadySseTaskScheduler")
+    public TaskScheduler steadySseTaskScheduler() {
+        var scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(2);
+        scheduler.setThreadNamePrefix("steadysse-");
+        scheduler.setDaemon(true);
+        return scheduler;
     }
 }
