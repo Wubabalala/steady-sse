@@ -123,19 +123,18 @@ public class RetryableSseEmitter extends FlushingSseEmitter {
         // If we haven't already finalized, treat it as a success completion.
         if (!finalCompleted.get()) {
             log.debug("[SteadySSE] Spring onCompletion triggered (fallback path)");
-            doFinalComplete(StreamEndStatus.SUCCESS, null);
+            doFinalComplete(StreamEndStatus.SUCCESS, null, null);
         }
     }
 
     private void handleSpringOnTimeout() {
         log.debug("[SteadySSE] Spring onTimeout triggered (fallback path)");
-        doFinalComplete(StreamEndStatus.TIMEOUT, null);
-        lifecycleListeners.fireTimeout("spring-timeout");
+        doFinalComplete(StreamEndStatus.TIMEOUT, null, "spring-timeout");
     }
 
     private void handleSpringOnError(Throwable ex) {
         log.debug("[SteadySSE] Spring onError triggered (fallback path): {}", ex.getMessage());
-        doFinalComplete(StreamEndStatus.ERROR, ex);
+        doFinalComplete(StreamEndStatus.ERROR, ex, null);
     }
 
     // ========== Core Methods ==========
@@ -143,31 +142,50 @@ public class RetryableSseEmitter extends FlushingSseEmitter {
     /**
      * Central finalization logic. All completeXxx methods funnel through here.
      * CAS ensures this runs exactly once.
+     * <p>
+     * <b>Signal ordering contract:</b>
+     * <ol>
+     *   <li>Detail signal first: {@code onTimeout(reason)} / {@code onCancel()} / {@code onError(error)}</li>
+     *   <li>Terminal signal last: {@code onComplete(status)} — always fires exactly once</li>
+     * </ol>
+     * <p>
+     * SseConnectionManager (and all external listeners) should do cleanup ONLY in
+     * {@code onComplete}, which is guaranteed to fire exactly once for any exit path.
+     * Detail signals ({@code onTimeout/onCancel/onError}) provide additional context
+     * but must NOT duplicate cleanup logic.
+     *
+     * @param status the end status
+     * @param error the error (null for non-error paths)
+     * @param timeoutReason the timeout reason (null for non-timeout paths)
      */
-    private boolean doFinalComplete(StreamEndStatus status, Throwable error) {
+    private boolean doFinalComplete(StreamEndStatus status, Throwable error, String timeoutReason) {
         if (!finalCompleted.compareAndSet(false, true)) {
             return false;
         }
 
         retryMode.set(false);
 
-        // Fire lifecycle listeners based on status
+        // 1. Detail signals first (provide context to listeners)
         switch (status) {
-            case SUCCESS -> lifecycleListeners.fireComplete(StreamEndStatus.SUCCESS);
-            case TIMEOUT -> lifecycleListeners.fireComplete(StreamEndStatus.TIMEOUT);
-            case CANCELLED -> {
-                lifecycleListeners.fireCancel();
-                lifecycleListeners.fireComplete(StreamEndStatus.CANCELLED);
+            case SUCCESS -> { /* no detail signal */ }
+            case TIMEOUT -> {
+                if (timeoutReason != null) {
+                    lifecycleListeners.fireTimeout(timeoutReason);
+                }
             }
+            case CANCELLED -> lifecycleListeners.fireCancel();
             case ERROR -> {
                 if (error != null) {
                     lifecycleListeners.fireError(error);
                 }
-                lifecycleListeners.fireComplete(StreamEndStatus.ERROR);
             }
         }
 
-        // Close the connection
+        // 2. Terminal signal last — exactly once, covers all paths
+        //    Listeners should do cleanup here (semaphore release, connection removal, etc.)
+        lifecycleListeners.fireComplete(status);
+
+        // 3. Close the connection
         try {
             super.complete();
         } catch (Exception e) {
@@ -187,7 +205,7 @@ public class RetryableSseEmitter extends FlushingSseEmitter {
             return;
         }
 
-        if (doFinalComplete(StreamEndStatus.SUCCESS, null)) {
+        if (doFinalComplete(StreamEndStatus.SUCCESS, null, null)) {
             log.debug("[SteadySSE] Normal completion - retryCount={}", retryCount.get());
         }
     }
@@ -251,9 +269,9 @@ public class RetryableSseEmitter extends FlushingSseEmitter {
      */
     public void finalComplete(Throwable error) {
         if (error == null) {
-            doFinalComplete(StreamEndStatus.SUCCESS, null);
+            doFinalComplete(StreamEndStatus.SUCCESS, null, null);
         } else {
-            doFinalComplete(StreamEndStatus.ERROR, error);
+            doFinalComplete(StreamEndStatus.ERROR, error, null);
         }
     }
 
@@ -261,8 +279,7 @@ public class RetryableSseEmitter extends FlushingSseEmitter {
      * Complete with timeout status.
      */
     public void completeWithTimeout(String reason) {
-        if (doFinalComplete(StreamEndStatus.TIMEOUT, null)) {
-            lifecycleListeners.fireTimeout(reason);
+        if (doFinalComplete(StreamEndStatus.TIMEOUT, null, reason)) {
             log.info("[SteadySSE] Timeout completion - reason={}", reason);
         }
     }
@@ -272,7 +289,7 @@ public class RetryableSseEmitter extends FlushingSseEmitter {
      */
     public void completeWithCancel() {
         cancelled.set(true);
-        if (doFinalComplete(StreamEndStatus.CANCELLED, null)) {
+        if (doFinalComplete(StreamEndStatus.CANCELLED, null, null)) {
             log.info("[SteadySSE] Cancel completion - retryCount={}", retryCount.get());
         }
     }

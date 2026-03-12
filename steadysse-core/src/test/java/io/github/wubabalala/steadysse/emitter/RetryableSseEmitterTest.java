@@ -175,6 +175,67 @@ class RetryableSseEmitterTest {
         assertThat(count.get()).isEqualTo(1);
     }
 
+    // === Signal Ordering Contract ===
+
+    @Test
+    void timeoutSignalOrderIsDetailThenTerminal() {
+        var emitter = createEmitter();
+        var order = new java.util.ArrayList<String>();
+        emitter.addLifecycleListener(new SseLifecycleListener() {
+            @Override public void onTimeout(String reason) { order.add("timeout:" + reason); }
+            @Override public void onComplete(StreamEndStatus status) { order.add("complete:" + status); }
+        });
+
+        emitter.completeWithTimeout("idle");
+
+        // Detail signal (onTimeout) must fire BEFORE terminal signal (onComplete)
+        assertThat(order).containsExactly("timeout:idle", "complete:TIMEOUT");
+    }
+
+    @Test
+    void cancelSignalOrderIsDetailThenTerminal() {
+        var emitter = createEmitter();
+        var order = new java.util.ArrayList<String>();
+        emitter.addLifecycleListener(new SseLifecycleListener() {
+            @Override public void onCancel() { order.add("cancel"); }
+            @Override public void onComplete(StreamEndStatus status) { order.add("complete:" + status); }
+        });
+
+        emitter.completeWithCancel();
+
+        assertThat(order).containsExactly("cancel", "complete:CANCELLED");
+    }
+
+    @Test
+    void errorSignalOrderIsDetailThenTerminal() {
+        var emitter = createEmitter();
+        var order = new java.util.ArrayList<String>();
+        emitter.addLifecycleListener(new SseLifecycleListener() {
+            @Override public void onError(Throwable e) { order.add("error:" + e.getMessage()); }
+            @Override public void onComplete(StreamEndStatus status) { order.add("complete:" + status); }
+        });
+
+        emitter.completeWithError(new RuntimeException("test"));
+
+        assertThat(order).containsExactly("error:test", "complete:ERROR");
+    }
+
+    @Test
+    void successHasNoDetailSignal() {
+        var emitter = createEmitter();
+        var order = new java.util.ArrayList<String>();
+        emitter.addLifecycleListener(new SseLifecycleListener() {
+            @Override public void onTimeout(String r) { order.add("timeout"); }
+            @Override public void onCancel() { order.add("cancel"); }
+            @Override public void onError(Throwable e) { order.add("error"); }
+            @Override public void onComplete(StreamEndStatus status) { order.add("complete:" + status); }
+        });
+
+        emitter.complete();
+
+        assertThat(order).containsExactly("complete:SUCCESS");
+    }
+
     // === Spring Callback Override Guards ===
 
     @Test
