@@ -1,0 +1,5 @@
+jdk:
+  - 17
+
+install:
+  - mvn clean install -DskipTests -pl steadysse-core -am

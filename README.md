@@ -37,11 +37,20 @@ SteadySSE solves these with a drop-in library extracted from a production system
 
 ### 1. Add Dependency
 
+[![](https://jitpack.io/v/Wubabalala/steady-sse.svg)](https://jitpack.io/#Wubabalala/steady-sse)
+
 ```xml
+<repositories>
+    <repository>
+        <id>jitpack.io</id>
+        <url>https://jitpack.io</url>
+    </repository>
+</repositories>
+
 <dependency>
-    <groupId>io.github.wubabalala</groupId>
+    <groupId>com.github.Wubabalala</groupId>
     <artifactId>steadysse-core</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>v0.1.0</version>
 </dependency>
 ```
 
