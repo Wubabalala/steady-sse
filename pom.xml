@@ -44,6 +44,7 @@
 
     <modules>
         <module>steadysse-core</module>
+        <module>samples/spring-boot-demo</module>
     </modules>
 
     <dependencyManagement>

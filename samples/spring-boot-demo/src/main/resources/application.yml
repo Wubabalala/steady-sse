@@ -1,0 +1,16 @@
+server:
+  port: 8081
+
+steady-sse:
+  max-concurrent: 10
+  heartbeat-interval: 10s
+  timeout:
+    first-chunk: 30s
+    idle: 60s
+    hard: 300s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: steadysse,health
