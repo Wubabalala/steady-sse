@@ -112,6 +112,14 @@ All beans are auto-configured. Override any by defining your own `@Bean`.
 | `steady-sse.timeout.idle` | 60s | Max silence between chunks |
 | `steady-sse.timeout.hard` | 300s | Absolute connection lifetime |
 
+## Host Application Safety
+
+SteadySSE is designed to be a well-behaved library that does not interfere with your application:
+
+- **No `@EnableScheduling` pollution** — SteadySSE schedules its own heartbeat and timeout tasks directly via `TaskScheduler`, without enabling Spring's global `@Scheduled` processing. Your application's scheduling configuration remains untouched.
+- **Servlet container compatibility** — `FlushingSseEmitter` gracefully handles containers that don't support `setBufferSize(0)` (e.g., some Undertow configurations), falling back to flush-only mode automatically.
+- **Connection key safety** — `SseConnectionManager.register()` rejects duplicate keys immediately rather than silently replacing active connections, preventing subtle resource leaks.
+
 ## Architecture
 
 See [docs/architecture.md](docs/architecture.md) for component design and signal flow.
@@ -121,6 +129,10 @@ See [docs/architecture.md](docs/architecture.md) for component design and signal
 - Java 17+
 - Spring Boot 3.2+
 - Servlet container (Tomcat, Jetty, Undertow)
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## License
 
