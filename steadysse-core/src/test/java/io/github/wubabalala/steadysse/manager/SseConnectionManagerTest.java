@@ -13,6 +13,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -44,6 +45,24 @@ class SseConnectionManagerTest {
         assertThrows(SseConnectionRejectedException.class, () ->
                 manager.register("k3", createEmitter())
         );
+    }
+
+    @Test
+    void duplicateKeyRejectedWithoutReplacingActiveConnection() {
+        var emitter = createEmitter();
+        manager.register("k1", emitter);
+
+        var ex = assertThrows(IllegalArgumentException.class, () ->
+                manager.register("k1", createEmitter()));
+
+        assertEquals("SSE connection key already registered: k1", ex.getMessage());
+        assertThat(manager.getActiveCount()).isEqualTo(1);
+        assertThat(manager.getAvailablePermits()).isEqualTo(1);
+
+        emitter.complete();
+
+        assertThat(manager.getActiveCount()).isEqualTo(0);
+        assertThat(manager.getAvailablePermits()).isEqualTo(2);
     }
 
     @Test
@@ -227,6 +246,24 @@ class SseConnectionManagerTest {
 
         var snapshot = mgr.getMetricsSnapshot();
         assertThat(snapshot.totalRejected()).isEqualTo(1);
+    }
+
+    @Test
+    void duplicateKeyDoesNotCountAsConcurrencyRejection() {
+        var metrics = new SseConnectionMetrics();
+        var props = new SteadySseProperties();
+        props.setMaxConcurrent(2);
+        var mgr = new SseConnectionManager(props, metrics);
+
+        mgr.register("k1", createEmitter());
+
+        assertThrows(IllegalArgumentException.class, () ->
+                mgr.register("k1", createEmitter()));
+
+        var snapshot = mgr.getMetricsSnapshot();
+        assertThat(snapshot.totalRejected()).isEqualTo(0);
+        assertThat(snapshot.active()).isEqualTo(1);
+        assertThat(snapshot.availablePermits()).isEqualTo(1);
     }
 
     @Test

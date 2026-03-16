@@ -14,8 +14,14 @@ import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.time.Duration;
+import java.util.concurrent.ScheduledFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class SteadySseAutoConfigurationTest {
 
@@ -106,6 +112,38 @@ class SteadySseAutoConfigurationTest {
                     // Custom one has pool size 4
                     assertThat(((ThreadPoolTaskScheduler) scheduler).getPoolSize()).isEqualTo(4);
                 });
+    }
+
+    @Test
+    void schedulingConfigurationSchedulesAndCancelsInternalTasks() throws Exception {
+        var props = new SteadySseProperties();
+        props.setHeartbeatInterval(Duration.ofSeconds(3));
+        props.setCleanupInterval(Duration.ofSeconds(5));
+        @SuppressWarnings("unchecked")
+        ScheduledFuture<Object> heartbeatTask = mock(ScheduledFuture.class);
+        @SuppressWarnings("unchecked")
+        ScheduledFuture<Object> timeoutTask = mock(ScheduledFuture.class);
+        TaskScheduler scheduler = mock(TaskScheduler.class);
+        when(scheduler.scheduleAtFixedRate(any(Runnable.class), eq(Duration.ofSeconds(3))))
+                .thenReturn(heartbeatTask);
+        when(scheduler.scheduleAtFixedRate(any(Runnable.class), eq(Duration.ofSeconds(5))))
+                .thenReturn(timeoutTask);
+
+        var configuration = new SteadySseSchedulingConfiguration(
+                props,
+                mock(SseHeartbeatDetector.class),
+                mock(SseTimeoutDetector.class),
+                scheduler);
+
+        configuration.afterPropertiesSet();
+
+        verify(scheduler).scheduleAtFixedRate(any(Runnable.class), eq(Duration.ofSeconds(3)));
+        verify(scheduler).scheduleAtFixedRate(any(Runnable.class), eq(Duration.ofSeconds(5)));
+
+        configuration.destroy();
+
+        verify(heartbeatTask).cancel(true);
+        verify(timeoutTask).cancel(true);
     }
 
     // === Test configurations ===

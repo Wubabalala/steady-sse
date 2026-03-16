@@ -27,6 +27,7 @@ public class FlushingSseEmitter extends SseEmitter {
     private static final Logger log = LoggerFactory.getLogger(FlushingSseEmitter.class);
 
     private final HttpServletResponse response;
+    private volatile boolean bufferSizeTuningDisabled;
 
     public FlushingSseEmitter(Long timeout, HttpServletResponse response) {
         super(timeout);
@@ -94,8 +95,7 @@ public class FlushingSseEmitter extends SseEmitter {
                             currentContentType);
                     response.setContentType("text/event-stream");
                 }
-                // Layer 1: Reset buffer size to 0 (disable buffering)
-                response.setBufferSize(0);
+                tuneBufferSize();
             }
 
             // Layer 2: Flush servlet response buffer
@@ -109,6 +109,21 @@ public class FlushingSseEmitter extends SseEmitter {
         } catch (IOException e) {
             // Client disconnect — normal during SSE, no need to log as error
             log.trace("[SteadySSE] Flush failed (client likely disconnected): {}", e.getMessage());
+        }
+    }
+
+    private void tuneBufferSize() {
+        if (bufferSizeTuningDisabled) {
+            return;
+        }
+
+        try {
+            // Layer 1: Reset buffer size to 0 (disable buffering)
+            response.setBufferSize(0);
+        } catch (RuntimeException e) {
+            bufferSizeTuningDisabled = true;
+            log.warn("[SteadySSE] Response buffer-size tuning unsupported, continuing without it: {}",
+                    e.getMessage());
         }
     }
 

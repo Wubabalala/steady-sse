@@ -6,26 +6,24 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.beans.factory.DisposableBean;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.scheduling.TaskScheduler;
-import org.springframework.scheduling.annotation.EnableScheduling;
-import org.springframework.scheduling.annotation.SchedulingConfigurer;
-import org.springframework.scheduling.config.ScheduledTaskRegistrar;
+
+import java.util.concurrent.ScheduledFuture;
 
 /**
- * Auto-registers scheduled tasks for heartbeat and timeout detection.
+ * Auto-registers internal scheduled tasks for heartbeat and timeout detection.
  * <p>
  * Uses the {@code steadySseTaskScheduler} bean (2-thread pool by default)
  * to ensure heartbeat and timeout checks run independently and don't
  * block each other or the application's other scheduled tasks.
  * <p>
- * Users can override the scheduler by defining their own {@code steadySseTaskScheduler}
- * bean — for example, using Java 21 virtual threads for high-throughput scenarios.
+ * Important: this configuration schedules SteadySSE's own background tasks directly
+ * and does NOT enable Spring's global {@code @Scheduled} infrastructure for the host app.
  */
 @AutoConfiguration(after = SteadySseAutoConfiguration.class)
-@ConditionalOnBean(SteadySseAutoConfiguration.class)
-@EnableScheduling
-public class SteadySseSchedulingConfiguration implements SchedulingConfigurer {
+public class SteadySseSchedulingConfiguration implements InitializingBean, DisposableBean {
 
     private static final Logger log = LoggerFactory.getLogger(SteadySseSchedulingConfiguration.class);
 
@@ -33,6 +31,8 @@ public class SteadySseSchedulingConfiguration implements SchedulingConfigurer {
     private final SseHeartbeatDetector heartbeatDetector;
     private final SseTimeoutDetector timeoutDetector;
     private final TaskScheduler taskScheduler;
+    private ScheduledFuture<?> heartbeatTask;
+    private ScheduledFuture<?> timeoutTask;
 
     public SteadySseSchedulingConfiguration(SteadySseProperties properties,
                                              SseHeartbeatDetector heartbeatDetector,
@@ -45,20 +45,28 @@ public class SteadySseSchedulingConfiguration implements SchedulingConfigurer {
     }
 
     @Override
-    public void configureTasks(ScheduledTaskRegistrar taskRegistrar) {
-        taskRegistrar.setTaskScheduler(taskScheduler);
-
+    public void afterPropertiesSet() {
         log.info("[SteadySSE] Scheduling heartbeat every {} and timeout check every {}",
                 properties.getHeartbeatInterval(), properties.getCleanupInterval());
 
-        taskRegistrar.addFixedRateTask(
+        heartbeatTask = taskScheduler.scheduleAtFixedRate(
                 heartbeatDetector::sendHeartbeats,
-                properties.getHeartbeatInterval()
-        );
-
-        taskRegistrar.addFixedRateTask(
+                properties.getHeartbeatInterval());
+        timeoutTask = taskScheduler.scheduleAtFixedRate(
                 timeoutDetector::checkTimeouts,
-                properties.getCleanupInterval()
-        );
+                properties.getCleanupInterval());
+    }
+
+    @Override
+    public void destroy() {
+        cancelTask(heartbeatTask, "heartbeat");
+        cancelTask(timeoutTask, "timeout");
+    }
+
+    private void cancelTask(ScheduledFuture<?> task, String taskName) {
+        if (task != null) {
+            task.cancel(true);
+            log.debug("[SteadySSE] Cancelled {} task", taskName);
+        }
     }
 }

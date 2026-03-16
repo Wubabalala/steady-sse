@@ -13,6 +13,7 @@ import io.github.wubabalala.steadysse.metrics.SseConnectionMetricsSnapshot;
 
 import java.time.Instant;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 
@@ -56,12 +57,23 @@ public class SseConnectionManager {
     /**
      * Register a new SSE connection with concurrency control.
      * <p>
+     * The connection key must be unique while the connection is active. Re-registering
+     * the same key is treated as a caller error and is rejected without replacing the
+     * existing connection.
+     * <p>
      * Automatically adds a lifecycle listener that cleans up the connection
      * and releases the semaphore when the emitter completes (for any reason).
      *
      * @throws SseConnectionRejectedException if concurrency limit is reached
      */
     public void register(String key, RetryableSseEmitter emitter) {
+        Objects.requireNonNull(key, "key must not be null");
+        Objects.requireNonNull(emitter, "emitter must not be null");
+
+        if (connections.containsKey(key)) {
+            throw new IllegalArgumentException("SSE connection key already registered: " + key);
+        }
+
         if (!semaphore.tryAcquire()) {
             if (metrics != null) {
                 metrics.recordRejection();
@@ -71,7 +83,11 @@ public class SseConnectionManager {
         }
 
         var wrapper = new EmitterWrapper(emitter);
-        connections.put(key, wrapper);
+        EmitterWrapper existing = connections.putIfAbsent(key, wrapper);
+        if (existing != null) {
+            semaphore.release();
+            throw new IllegalArgumentException("SSE connection key already registered: " + key);
+        }
 
         // Bind activity callback — refreshes idle timeout on each successful send
         emitter.setActivityCallback(() -> updateActivity(key));
