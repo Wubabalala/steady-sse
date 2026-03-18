@@ -1,5 +1,10 @@
 # SteadySSE
 
+[![JitPack](https://jitpack.io/v/Wubabalala/steady-sse.svg)](https://jitpack.io/#Wubabalala/steady-sse)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Java](https://img.shields.io/badge/Java-17%2B-orange.svg)](https://openjdk.org/)
+[![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.2%2B-green.svg)](https://spring.io/projects/spring-boot)
+
 A reliability layer for Spring MVC `SseEmitter` in production.
 
 ## The Problem
